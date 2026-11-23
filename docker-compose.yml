@@ -1,0 +1,84 @@
+name: lunasin
+
+services:
+  # Nginx Web Server
+  lunasin-web:
+    image: nginx:alpine
+    container_name: lunasin-web
+    restart: unless-stopped
+    ports:
+      - "${FORWARD_HTTP_PORT:-8000}:80"
+    volumes:
+      - .:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - lunasin-app
+    networks:
+      - lunasin-network
+
+  # PHP-FPM Application
+  lunasin-app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    image: lunasin-app:latest
+    container_name: lunasin-app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+      - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    environment:
+      DB_HOST: lunasin-pgsql
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-lunasin}
+      DB_USERNAME: ${DB_USERNAME:-lunasin}
+      DB_PASSWORD: ${DB_PASSWORD:-secretpassword}
+    depends_on:
+      lunasin-pgsql:
+        condition: service_healthy
+    networks:
+      - lunasin-network
+
+  # PostgreSQL Database
+  lunasin-pgsql:
+    image: postgres:16-alpine
+    container_name: lunasin-pgsql
+    restart: unless-stopped
+    ports:
+      - "${FORWARD_DB_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-lunasin}
+      POSTGRES_USER: ${DB_USERNAME:-lunasin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secretpassword}
+    volumes:
+      - lunasin-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-lunasin} -d ${DB_DATABASE:-lunasin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lunasin-network
+
+  # Redis Cache & Queue
+  lunasin-redis:
+    image: redis:alpine
+    container_name: lunasin-redis
+    restart: unless-stopped
+    ports:
+      - "${FORWARD_REDIS_PORT:-6379}:6379"
+    volumes:
+      - lunasin-redisdata:/data
+    networks:
+      - lunasin-network
+
+networks:
+  lunasin-network:
+    driver: bridge
+
+volumes:
+  lunasin-pgdata:
+    name: lunasin-pgdata
+  lunasin-redisdata:
+    name: lunasin-redisdata
